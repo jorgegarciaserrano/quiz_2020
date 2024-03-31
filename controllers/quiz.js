@@ -1,5 +1,8 @@
 const Sequelize = require("sequelize");
+const Op = Sequelize.Op;
 const {models} = require("../models");
+
+const paginate = require('../helpers/paginate').paginate;
 
 // Autoload el quiz asociado a :quizId
 exports.load = async (req, res, next, quizId) => {
@@ -21,9 +24,40 @@ exports.load = async (req, res, next, quizId) => {
 // GET /quizzes
 exports.index = async (req, res, next) => {
 
+    let countOptions = {};
+    let findOptions = {};
+
+    // Search:
+    const search = req.query.search || '';
+    if (search) {
+        const search_like = "%" + search.replace(/ +/g,"%") + "%";
+
+        countOptions.where = {question: { [Op.like]: search_like }};
+        findOptions.where = {question: { [Op.like]: search_like }};
+    }
+
     try {
-        const quizzes = await models.Quiz.findAll();
-        res.render('quizzes/index.ejs', {quizzes});
+        const count = await models.Quiz.count(countOptions);
+
+        // Pagination:
+
+        const items_per_page = 10;
+
+        // The page to show is given in the query
+        const pageno = parseInt(req.query.pageno) || 1;
+
+        // Create a String with the HTMl used to render the pagination buttons.
+        // This String is added to a local variable of res, which is used into the application layout file.
+        res.locals.paginate_control = paginate(count, items_per_page, pageno, req.url);
+
+        findOptions.offset = items_per_page * (pageno - 1);
+        findOptions.limit = items_per_page;
+
+        const quizzes = await models.Quiz.findAll(findOptions);
+        res.render('quizzes/index.ejs', {
+            quizzes,
+            search
+        });
     } catch (error) {
         next(error);
     }
@@ -42,21 +76,19 @@ exports.show = (req, res, next) => {
 // GET /quizzes/new
 exports.new = (req, res, next) => {
 
-    //Crea un quiz con los parámetros vacíos
     const quiz = {
         question: "",
         answer: ""
     };
-    //Renderiza la view quizzes/new con el quiz vacío
+
     res.render('quizzes/new', {quiz});
 };
 
 // POST /quizzes/create
 exports.create = async (req, res, next) => {
-    //donde express mete los parametros que se han enviado en un post
+
     const {question, answer} = req.body;
-   
-    //se crea una instancia de la DDBB.
+
     let quiz = models.Quiz.build({
         question,
         answer
@@ -65,13 +97,15 @@ exports.create = async (req, res, next) => {
     try {
         // Saves only the fields question and answer into the DDBB
         quiz = await quiz.save({fields: ["question", "answer"]});
+        req.flash('success', 'Quiz created successfully.');
         res.redirect('/quizzes/' + quiz.id);
     } catch (error) {
         if (error instanceof Sequelize.ValidationError) {
-            console.log('There are errors in the form:');
-            error.errors.forEach(({message}) => console.log(message));
+            req.flash('error', 'There are errors in the form:');
+            error.errors.forEach(({message}) => req.flash('error', message));
             res.render('quizzes/new', {quiz});
         } else {
+            req.flash('error', 'Error creating a new Quiz: ' + error.message);
             next(error);
         }
     }
@@ -80,10 +114,9 @@ exports.create = async (req, res, next) => {
 
 // GET /quizzes/:quizId/edit
 exports.edit = (req, res, next) => {
-    //coge del autoload el quiz que se quiere editar.
+
     const {quiz} = req.load;
 
-    //se renderiza en las views el quiz que se va a editar. 
     res.render('quizzes/edit', {quiz});
 };
 
@@ -99,13 +132,15 @@ exports.update = async (req, res, next) => {
 
     try {
         await quiz.save({fields: ["question", "answer"]});
+        req.flash('success', 'Quiz edited successfully.');
         res.redirect('/quizzes/' + quiz.id);
     } catch (error) {
         if (error instanceof Sequelize.ValidationError) {
-            console.log('There are errors in the form:');
-            error.errors.forEach(({message}) => console.log(message));
+            req.flash('error', 'There are errors in the form:');
+            error.errors.forEach(({message}) => req.flash('error', message));
             res.render('quizzes/edit', {quiz});
         } else {
+            req.flash('error', 'Error editing the Quiz: ' + error.message);
             next(error);
         }
     }
@@ -117,8 +152,10 @@ exports.destroy = async (req, res, next) => {
 
     try {
         await req.load.quiz.destroy();
+        req.flash('success', 'Quiz deleted successfully.');
         res.redirect('/quizzes');
     } catch (error) {
+        req.flash('error', 'Error deleting the Quiz: ' + error.message);
         next(error);
     }
 };
