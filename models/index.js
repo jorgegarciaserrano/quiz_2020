@@ -19,3 +19,7 @@ sequelize.import(path.join(__dirname,'session'));
 
 
 module.exports = sequelize;
+
+
+
+
